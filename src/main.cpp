@@ -117,10 +117,6 @@ void loop() {
       digitalWrite(ledPinR, HIGH);
       trafficState = 0;
       currentInterval = 6000; 
-      if (barrierLowered) {
-        trafficState = 3;
-        currentInterval = 0;
-      }
     }
     else if (trafficState == 3) {
       while (digitalRead(pirPin) == HIGH){
@@ -143,6 +139,8 @@ void loop() {
   if (pedestrianDetected && trafficState == 0 && !barrierLowered) { 
     myServo.write(90); // Drop barrier to 90 degrees
     barrierLowered = true;
+    trafficState = 3;
+    currentInterval = 8000;
   }
 
   // Check if the barrier has been down for 5 seconds
