@@ -3,13 +3,29 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define DHTTYPE DHT22
 
 int ledPinR = 13;
 int ledPinY = 26;
 int ledPinG = 25;
-int pirPin = 34;
+int pirPin = 33;
+
+int DHT22Pin = 23;
+DHT dht(DHT22Pin, DHTTYPE);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
 Servo myServo;
 int servoPin = 14;
+
+int trigPin = 19;
+int echoPin = 18;
 
 const char* ssid = "Wokwi-GUEST";
 const char* password = "";
@@ -21,60 +37,207 @@ unsigned long previousMillis = 0;
 unsigned long currentInterval = 6000; // Starts with Red light delay
 int trafficState = 0; // 0 = Red, 1 = Green, 2 = Yellow
 
+// Timing used for speed check
+unsigned long lastSpeedCheckMillis = 0;
+unsigned long speedCheckInterval = 100; // Take a reading every 100ms
+float lastDistance = -1;
+
+// Timing used for non-blocking warning display
+unsigned long lastWarningMillis = 0;
+unsigned long WarningInterval = 1000;
 
 bool pedestrianDetected = false;
 bool barrierLowered = false;
+int speedLimit = 80; // Default speed limit in km/h
 
-void fetchWeatherData() {
+struct weatherData {
+  float temperature;
+  float humidity;
+};
+
+weatherData onlineWeather;
+
+weatherData fetchOnlineWeatherData() {
   HTTPClient http;
   http.begin(api_url);
   int httpResponseCode = http.GET();
-
+  float temperature;
+  float humidity;
   if (httpResponseCode > 0) {
     String payload = http.getString();
     JsonDocument doc; 
     deserializeJson(doc, payload);
-    Serial.println("Gold Coast Weather Data:");
-    float temperature = doc["current"]["temperature_2m"];
-    float windSpeed = doc["current"]["wind_speed_10m"];
-    float humidity = doc["current"]["relative_humidity_2m"];
-    Serial.print("Time: ");
-    Serial.println(doc["current"]["time"].as<String>());
+    temperature = doc["current"]["temperature_2m"];
+    humidity = doc["current"]["relative_humidity_2m"];
+    Serial.println("Online Weather Data:");
     Serial.print("Temperature: ");
     Serial.print(temperature);
     Serial.println(" °C");
-    Serial.print("Wind Speed: ");
-    Serial.print(windSpeed);
-    Serial.println(" m/s");
     Serial.print("Humidity: ");
     Serial.print(humidity);
     Serial.println(" %");
   } else {
     Serial.print("Error on HTTP request: ");
     Serial.println(httpResponseCode);
+    temperature = 0;
+    humidity = -1;
   }
 
   http.end();
+  return {temperature, humidity};
+}
+weatherData getDHT22Readout() {
+  // Reading temperature or humidity takes about 250 milliseconds
+  // Sensor readings may also be up to 2 seconds 'old'
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature(); // Reads Celsius by default
+  // Check if any reads failed and exit early
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println("Failed to read from DHT22 sensor!");
+    return {0, -1};
+  }
+  Serial.println("DHT22 Sensor Readings:");
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+  return {temperature, humidity};
 }
 
+int newSpeedLimit() {
+  weatherData DHT22Weather = getDHT22Readout();
+  float temperature;
+  float humidity;
+  if (DHT22Weather.humidity == -1 && onlineWeather.humidity == -1) {
+    return speedLimit; // Return the last known speed limit if sensor fails
+  }
+  else if (DHT22Weather.humidity == -1) {
+    temperature = onlineWeather.temperature;
+    humidity = onlineWeather.humidity;
+  }
+  else if (onlineWeather.humidity == -1) {
+    temperature = DHT22Weather.temperature;
+    humidity = DHT22Weather.humidity;
+  }
+  else {
+    temperature = (DHT22Weather.temperature + onlineWeather.temperature) / 2;
+    humidity = (DHT22Weather.humidity + onlineWeather.humidity) / 2;
+  }
+  Serial.println("Merged Readings:");
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+  if (temperature <= 0 && humidity > 90) {
+    return 40; // Lower speed limit in extreme conditions
+  } else if (temperature > 0 && humidity > 90) {
+    return 60; // Higher speed limit in hot and dry conditions
+  } else {
+    return 80; // Default speed limit
+  }
+}
+
+void showSpeedLimit(int speed) {
+  display.clearDisplay();
+
+  // Optional: Draw a border or circular sign outline
+  display.drawCircle(64, 32, 30, SSD1306_WHITE);
+
+  // Print speed number
+  display.setTextSize(3);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Center alignment offset
+  if (speed < 100) {
+    display.setCursor(48, 22);
+  } else {
+    display.setCursor(40, 22);
+  }
+
+  display.print(speed);
+
+  display.display();
+}
+
+float getDistanceCM() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // Read the echo pulse, timeout after 30ms to prevent lag if no object is found
+  long duration = pulseIn(echoPin, HIGH, 30000); 
+  
+  if (duration == 0) return -1; // Returns -1 if out of range
+  
+  // Calculate distance in cm (Speed of sound is ~0.034 cm/microsecond)
+  return duration * 0.034 / 2; 
+}
+bool isSpeeding() {
+  bool speeding = false;
+  if (millis() - lastSpeedCheckMillis >= speedCheckInterval) {
+    lastSpeedCheckMillis = millis();
+    
+    float currentDistance = getDistanceCM();
+
+    // Ensure we have valid readings for both current and previous distances
+    if (currentDistance > 0 && lastDistance > 0) {
+      
+      // Calculate how far the car moved (in cm)
+      float distanceChanged = lastDistance - currentDistance; 
+
+      if (distanceChanged > 0) { // Positive change means the car is moving towards the sensor
+        // Convert distance to meters
+        float distance_m = distanceChanged / 100.0; 
+        
+        // Convert interval to seconds
+        float time_s = speedCheckInterval / 1000.0; 
+        
+        // Speed = d/t (m/s)
+        float speed_m_s = distance_m / time_s; 
+        
+        // Convert to km/h
+        float speed = speed_m_s * 3.6;
+        speeding = speed > speedLimit;
+      }
+    }
+    lastDistance = currentDistance;
+  }
+  return speeding;
+}
+
+
 void setup() {
+  // wifi connection
   Serial.begin(115200);
   WiFi.begin(ssid, password);
   
   delay(100); 
-  
+
+  int wifiTimeCounter = 0;
   while (WiFi.status() != WL_CONNECTED){
     delay(500);
     Serial.print(".");
+    wifiTimeCounter++;
+    if (wifiTimeCounter > 20) { // Timeout after 10 seconds
+      break;
+    }
   }
 
-  Serial.println("\nIP Address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("\nWiFi Status: ");
+  Serial.println(WiFi.status() == WL_CONNECTED? "Connected" : "Not Connected");
   
   pinMode(ledPinY, OUTPUT);
   pinMode(ledPinR, OUTPUT);
   pinMode(ledPinG, OUTPUT);
 
+  // servo setup
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
@@ -86,11 +249,31 @@ void setup() {
   // Set initial servo position to close (0)
   myServo.write(0);
 
+  // sensor setup
   pinMode(pirPin, INPUT);
+  dht.begin();
 
+  // Initiate traffic light state
   digitalWrite(ledPinR, HIGH);
   digitalWrite(ledPinY, LOW);
   digitalWrite(ledPinG, LOW);
+
+  // Speed limit sign setup
+  Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    for (;;);
+  }
+
+  showSpeedLimit(speedLimit); // Set initial speed sign
+
+  // ultrasound sensor setup
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // get online weather data at each bootup
+  onlineWeather = fetchOnlineWeatherData();
 }
 
 void loop() {
@@ -105,6 +288,7 @@ void loop() {
       digitalWrite(ledPinG, HIGH);
       trafficState = 1;
       currentInterval = 8000; 
+      speedLimit = newSpeedLimit(); // Update speed limit based on weather conditions
     } 
     else if (trafficState == 1) {
       digitalWrite(ledPinG, LOW);
@@ -143,6 +327,18 @@ void loop() {
     currentInterval = 8000;
   }
 
+  if (isSpeeding()){
+    display.clearDisplay();
+    display.setTextSize(3);
+    display.setCursor(30, 22);
+    display.print("SLOW!");
+    display.display();
+    lastWarningMillis = currentMillis;
+    //display.print(speedLimit);
+    } // Check speed every loop iteration
+  else if (currentMillis - lastWarningMillis >= WarningInterval) {
+    showSpeedLimit(speedLimit); // Reset to speed limit sign after warning
+  }
   // Check if the barrier has been down for 5 seconds
   /*if ((currentMillis - previousMillis >= currentInterval) && trafficState == 0 && barrierLowered) {
     while (digitalRead(pirPin) == HIGH){
