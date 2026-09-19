@@ -25,14 +25,7 @@
       "left": 20.3,
       "attrs": { "common": "cathode" }
     },
-    {
-      "type": "wokwi-servo",
-      "id": "servo1",
-      "top": 380.2,
-      "left": 58.6,
-      "rotate": 90,
-      "attrs": {}
-    },
+    { "type": "wokwi-servo", "id": "servo1", "top": 361, "left": 49, "rotate": 90, "attrs": {} },
     { "type": "wokwi-pir-motion-sensor", "id": "pir1", "top": 4, "left": 213.42, "attrs": {} },
     { "type": "wokwi-dht22", "id": "dht1", "top": -38.1, "left": 388.2, "attrs": {} },
     {
@@ -42,7 +35,72 @@
       "left": 422.63,
       "attrs": { "i2cAddress": "0x3c" }
     },
-    { "type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": 11.1, "left": 456.7, "attrs": {} }
+    { "type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": 30.3, "left": 485.5, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 374.5,
+      "left": 236.7,
+      "rotate": 270,
+      "attrs": { "color": "green", "xray": "1" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 385.6,
+      "left": 292.2,
+      "rotate": 180,
+      "attrs": { "color": "red" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text1",
+      "top": 432,
+      "left": 220.8,
+      "attrs": { "text": "Upload toggle button" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text2",
+      "top": -19.2,
+      "left": 192,
+      "attrs": { "text": "Pedestrian sensing" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text3",
+      "top": 470.4,
+      "left": 412.8,
+      "attrs": { "text": "Speed warning sign" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text4",
+      "top": 48,
+      "left": 38.4,
+      "attrs": { "text": "Traffic light" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text5",
+      "top": 499.2,
+      "left": 38.4,
+      "attrs": { "text": "Pedestrian crossing barrier" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text6",
+      "top": 9.6,
+      "left": 508.8,
+      "attrs": { "text": "Speeding detect" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "text7",
+      "top": -57.6,
+      "left": 326.4,
+      "attrs": { "text": "Weather (ambient) sensor" }
+    }
   ],
   "connections": [
     [ "rgb3:R", "esp1:13", "green", [ "v0" ] ],
@@ -54,16 +112,16 @@
     [ "esp1:GND.1", "bb1:11t.e", "black", [ "h0" ] ],
     [ "esp1:TX", "$serialMonitor:RX", "", [] ],
     [ "esp1:RX", "$serialMonitor:TX", "", [] ],
-    [ "esp1:5V", "servo1:V+", "red", [ "h-153.45", "v48" ] ],
-    [ "servo1:GND", "esp1:GND.1", "black", [ "v-86.4" ] ],
-    [ "esp1:14", "servo1:PWM", "green", [ "h-163.05", "v115.2" ] ],
+    [ "esp1:5V", "servo1:V+", "red", [ "h-163.05", "v28.8" ] ],
+    [ "servo1:GND", "esp1:GND.1", "black", [ "v-76.8" ] ],
+    [ "esp1:14", "servo1:PWM", "green", [ "h-172.65", "v96" ] ],
     [ "esp1:GND.1", "pir1:GND", "black", [ "h0" ] ],
     [ "esp1:5V", "pir1:VCC", "red", [ "h0" ] ],
-    [ "esp1:5V", "dht1:VCC", "red", [ "v38.4", "h134.55" ] ],
+    [ "esp1:5V", "dht1:VCC", "red", [ "v19.2", "h105.75" ] ],
     [ "pir1:OUT", "esp1:33", "green", [ "v0" ] ],
     [ "dht1:GND", "esp1:GND.2", "black", [ "v0" ] ],
     [ "oled1:GND", "esp1:GND.2", "black", [ "v0" ] ],
-    [ "esp1:5V", "oled1:VCC", "red", [ "v38.4", "h172.8" ] ],
+    [ "esp1:5V", "oled1:VCC", "red", [ "v19.2", "h172.8" ] ],
     [ "oled1:SDA", "esp1:21", "green", [ "v0" ] ],
     [ "oled1:SCL", "esp1:22", "green", [ "v0" ] ],
     [ "dht1:SDA", "esp1:23", "green", [ "v0" ] ],
@@ -80,9 +138,13 @@
     [ "rgb2:G", "bb1:12t.a", "", [ "$bb" ] ],
     [ "rgb2:B", "bb1:13t.a", "", [ "$bb" ] ],
     [ "ultrasonic1:GND", "esp1:GND.2", "black", [ "v0" ] ],
-    [ "ultrasonic1:VCC", "esp1:5V", "red", [ "v240", "h-230.55" ] ],
+    [ "ultrasonic1:VCC", "esp1:5V", "red", [ "v201.6", "h-259.35" ] ],
     [ "ultrasonic1:TRIG", "esp1:19", "green", [ "v0" ] ],
-    [ "ultrasonic1:ECHO", "esp1:18", "green", [ "v0" ] ]
+    [ "ultrasonic1:ECHO", "esp1:18", "green", [ "v0" ] ],
+    [ "esp1:27", "btn1:1.r", "green", [ "h0" ] ],
+    [ "esp1:GND.1", "btn1:2.r", "black", [ "h-19.05", "v105.8" ] ],
+    [ "esp1:GND.1", "led1:C", "black", [ "h0" ] ],
+    [ "esp1:32", "led1:A", "green", [ "h0" ] ]
   ],
   "dependencies": {}
 }

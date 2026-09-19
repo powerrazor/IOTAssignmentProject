@@ -31,6 +31,7 @@ const char* ssid = "Wokwi-GUEST";
 const char* password = "";
 
 const char* api_url = "https://api.open-meteo.com/v1/forecast?latitude=-28.0167&longitude=153.4000&current=temperature_2m,wind_speed_10m,relative_humidity_2m&timezone=auto";
+WiFiClientSecure cloudClient;
 
 // Timing and state variables for the non-blocking traffic light
 unsigned long previousMillis = 0;
@@ -56,8 +57,74 @@ struct weatherData {
 };
 
 weatherData onlineWeather;
+float temperature;
+float humidity;
+
+
+// Upload Button Configuration (interupt)
+int BUTTON_PIN = 27;
+int LED_PIN = 32;
+
+volatile bool buttonPressedStatus = false;
+volatile unsigned long lastPressTime = 0;
+int ledState = LOW;
+
+void IRAM_ATTR handleButtonInterrupt() {
+  if (millis() - lastPressTime > 300) {
+    buttonPressedStatus = true;
+    lastPressTime = millis();
+  }
+}
+
+// Upload to ThingSpeak Configuration
+const char* THINGSPEAK_WRITE_API_KEY = "K7M54BBS399C6SFF";
+const char* THINGSPEAK_UPDATE_URL = "https://api.thingspeak.com/update";
+const unsigned long UPLOAD_INTERVAL = 20000;
+unsigned long lastUpload = 0;
+bool hasUploaded = false;
+
+String buildUpdateUrl(const char* apiKey, int trafficState, int speedLimit, float temperature, float humidity) {
+  return String(THINGSPEAK_UPDATE_URL) +
+         "?api_key=" + apiKey +
+         "&field1=" + String(trafficState) +
+         "&field2=" + String(speedLimit) +
+         "&field3=" + String(temperature, 2) +
+         "&field4=" + String(humidity, 2);
+}
+
+bool uploadReading(int trafficState, int speedLimit, float temperature, float humidity) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Upload skipped: Wi-Fi is not connected.");
+    return false;
+  }
+
+  cloudClient.setInsecure();  // Wokwi demo; pin ThingSpeak's CA in production.
+  HTTPClient http;
+  String url = buildUpdateUrl(THINGSPEAK_WRITE_API_KEY, trafficState, speedLimit, temperature, humidity);
+
+  if (!http.begin(cloudClient, url)) {
+    Serial.println("Could not initialise the HTTPS request.");
+    return false;
+  }
+
+  http.setConnectTimeout(5000);
+  http.setTimeout(5000);
+  int responseCode = http.GET();
+  String entryId = http.getString();
+  http.end();
+
+  Serial.print("ThingSpeak HTTP response: ");
+  Serial.print(responseCode);
+  Serial.print(" | entry id: ");
+  Serial.println(entryId);
+
+  // ThingSpeak answers with the new entry id, or "0" when the update was
+  // refused (bad key, or faster than the free-tier 15 s rate limit).
+  return responseCode == HTTP_CODE_OK && entryId.toInt() > 0;
+}
 
 weatherData fetchOnlineWeatherData() {
+  Serial.println("Fetching online weather data...");
   HTTPClient http;
   http.begin(api_url);
   int httpResponseCode = http.GET();
@@ -96,20 +163,13 @@ weatherData getDHT22Readout() {
     Serial.println("Failed to read from DHT22 sensor!");
     return {0, -1};
   }
-  Serial.println("DHT22 Sensor Readings:");
-  Serial.print("Temperature: ");
-  Serial.print(temperature);
-  Serial.println(" °C");
-  Serial.print("Humidity: ");
-  Serial.print(humidity);
-  Serial.println(" %");
   return {temperature, humidity};
 }
 
+
 int newSpeedLimit() {
   weatherData DHT22Weather = getDHT22Readout();
-  float temperature;
-  float humidity;
+
   if (DHT22Weather.humidity == -1 && onlineWeather.humidity == -1) {
     return speedLimit; // Return the last known speed limit if sensor fails
   }
@@ -125,17 +185,16 @@ int newSpeedLimit() {
     temperature = (DHT22Weather.temperature + onlineWeather.temperature) / 2;
     humidity = (DHT22Weather.humidity + onlineWeather.humidity) / 2;
   }
-  Serial.println("Merged Readings:");
   Serial.print("Temperature: ");
   Serial.print(temperature);
   Serial.println(" °C");
   Serial.print("Humidity: ");
   Serial.print(humidity);
   Serial.println(" %");
-  if (temperature <= 0 && humidity > 90) {
-    return 40; // Lower speed limit in extreme conditions
-  } else if (temperature > 0 && humidity > 90) {
-    return 60; // Higher speed limit in hot and dry conditions
+  if (temperature <= 0 && humidity > 70) {
+    return 40; // Possible icy conditions
+  } else if (temperature > 0 && humidity > 70) {
+    return 60; // Possible Wet / Foggy conditions
   } else {
     return 80; // Default speed limit
   }
@@ -144,8 +203,10 @@ int newSpeedLimit() {
 void showSpeedLimit(int speed) {
   display.clearDisplay();
 
-  // Optional: Draw a border or circular sign outline
+  // circular sign outline
   display.drawCircle(64, 32, 30, SSD1306_WHITE);
+  display.drawCircle(64, 32, 31, SSD1306_WHITE);
+  display.drawCircle(64, 32, 32, SSD1306_WHITE);
 
   // Print speed number
   display.setTextSize(3);
@@ -272,6 +333,11 @@ void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
+  // Upload button setup
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonInterrupt, FALLING);
+
   // get online weather data at each bootup
   onlineWeather = fetchOnlineWeatherData();
 }
@@ -349,4 +415,15 @@ void loop() {
     pedestrianDetected = false; // Reset the state
     barrierLowered = false; // Reset the barrier state
   }*/
+
+  if (buttonPressedStatus == true) {
+    buttonPressedStatus = false;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
+    Serial.println(ledState?"Upload enabled":"Upload disabled");
+  }
+  if (ledState == HIGH && currentMillis - lastUpload >= UPLOAD_INTERVAL) {
+    lastUpload = currentMillis;
+    uploadReading(trafficState, speedLimit, temperature, humidity);
+  }
 }
