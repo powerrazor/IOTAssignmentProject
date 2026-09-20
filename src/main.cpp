@@ -77,7 +77,7 @@ void IRAM_ATTR handleButtonInterrupt() {
 }
 
 // Upload to ThingSpeak Configuration
-const char* THINGSPEAK_WRITE_API_KEY = "K7M54BBS399C6SFF";
+const char* THINGSPEAK_WRITE_API_KEY = "";
 const char* THINGSPEAK_UPDATE_URL = "https://api.thingspeak.com/update";
 const unsigned long UPLOAD_INTERVAL = 20000;
 unsigned long lastUpload = 0;
